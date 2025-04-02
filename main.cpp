@@ -7,9 +7,12 @@
 #include <limits>
 #include <chrono>
 #include <cstdlib>
-#include <thread> 
+#include <thread>
+#include <iomanip> 
+#include <utility> 
 
 using namespace std;
+
 
 const vector<string> suits = {"♥", "♦", "♠", "♣"};
 const vector<string> ranks = {"Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Jack", "Queen", "King", "Ace"};
@@ -22,21 +25,13 @@ class Card {
 public:
     string suit;
     string rank;
-
     Card(string s, string r) : suit(s), rank(r) {}
-
     friend ostream& operator<<(ostream& os, const Card& card) {
         os << card.rank << " of " << card.suit;
         return os;
     }
-
     int getValue() const {
-         try {
-            return values.at(rank);
-         } catch (const out_of_range& oor) {
-            cerr << "Error: Invalid rank encountered: " << rank << endl;
-            return 0;
-         }
+        try { return values.at(rank); } catch (const out_of_range&) { return 0; }
     }
 };
 
@@ -45,95 +40,52 @@ public:
     vector<Card> cards;
     int value = 0;
     int aces = 0;
-
     void add_card(const Card& card) {
         cards.push_back(card);
         value += card.getValue();
-
-        if (card.rank == "Ace") {
-            aces++;
-        }
+        if (card.rank == "Ace") aces++;
         adjust_for_ace();
     }
-
     void adjust_for_ace() {
-        while (value > 21 && aces > 0) {
-            value -= 10;
-            aces--;
-        }
+        while (value > 21 && aces > 0) { value -= 10; aces--; }
     }
-
-    void clear() {
-        cards.clear();
-        value = 0;
-        aces = 0;
-    }
+    void clear() { cards.clear(); value = 0; aces = 0; }
 };
 
 class Deck {
 private:
     mt19937 rng;
-
 public:
     vector<Card> deck;
-
     Deck() {
         unsigned seed = chrono::system_clock::now().time_since_epoch().count();
         rng = mt19937(seed);
-
-        for (const auto& suit : suits) {
-            for (const auto& rank : ranks) {
-                deck.emplace_back(suit, rank);
-            }
-        }
+        for (const auto& s : suits) for (const auto& r : ranks) deck.emplace_back(s, r);
     }
-
-    void shuffle() {
-        std::shuffle(deck.begin(), deck.end(), rng);
-    }
-
+    void shuffle() { std::shuffle(deck.begin(), deck.end(), rng); }
     Card deal() {
-        if (deck.empty()) {
-             throw runtime_error("Dealing from an empty deck!");
-        }
-        Card dealtCard = deck.back();
-        deck.pop_back();
-        return dealtCard;
+        if (deck.empty()) throw runtime_error("Dealing empty deck");
+        Card c = deck.back(); deck.pop_back(); return c;
     }
-    size_t size() const {
-        return deck.size();
-    }
+    size_t size() const { return deck.size(); }
 };
 
 class Player {
 public:
     int balance;
     int bet;
-
     Player(int initial_balance = 1000) : balance(initial_balance), bet(0) {}
-
-    void win_bet() { 
-        balance += bet;
-    }
-
-    void lose_bet() { 
-        balance -= bet;
-    }
-
-     bool place_bet(int amount) {
-        if (amount > 0 && amount <= balance) {
-            bet = amount;
-            return true;
-        }
-         if (amount > balance) {
-             cout << "Bet exceeds current balance." << endl;
-         }
-         if (amount <= 0) {
-             cout << "Bet must be positive." << endl;
-         }
+    void win_bet() { balance += bet; } // For 1:1 games
+    void lose_bet() { balance -= bet; } // For 1:1 games or simple loss
+    bool place_bet(int amount) {
+        if (amount > 0 && amount <= balance) { bet = amount; return true; }
+        if (amount > balance) cout << "Bet exceeds balance." << endl;
+        if (amount <= 0) cout << "Bet must be positive." << endl;
         return false;
-     }
+    }
 };
+
+// --- Utility Functions ---
 
 void clear_screen() {
 #ifdef _WIN32
@@ -143,10 +95,9 @@ void clear_screen() {
 #endif
 }
 
-
-bool take_bet_slots(Player& player) {
+bool take_bet_generic(Player& player, const string& game_name) {
     while (true) {
-        cout << "Your balance: " << player.balance << ". Enter bet amount (or 0 to go back): ";
+        cout << "Your balance: " << player.balance << ". Enter bet for " << game_name << " (or 0 to go back): ";
         int bet_amount;
         cin >> bet_amount;
 
@@ -154,85 +105,27 @@ bool take_bet_slots(Player& player) {
             cout << "Invalid input. Please enter a number." << endl;
             cin.clear();
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            continue; 
+            continue;
         }
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
-        cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
-
-        if (bet_amount == 0) {
-            return false; 
-        } else if (bet_amount < 0) {
-             cout << "Bet must be a positive amount." << endl;
-        } else if (bet_amount > player.balance) {
-            cout << "Sorry, your bet cannot exceed your balance of " << player.balance << endl;
-        } else {
-             player.bet = bet_amount; 
-             return true; 
-        }
+        if (bet_amount == 0) return false;
+        if (player.place_bet(bet_amount)) return true; 
     }
 }
-
 
 void press_enter_to_continue() {
     cout << "\nPress Enter to continue...";
-    char c;
-    while(cin.get(c) && c != '\n');
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
     if (cin.peek() == '\n') cin.ignore();
 }
 
+// --- Game Implementations ---
 
-void hit_blackjack(Deck& deck, Hand& hand) {
-    hand.add_card(deck.deal());
-}
-
-bool hit_or_stand_blackjack(Deck& deck, Hand& hand) {
-    while (true) {
-        cout << "Would you like to Hit or Stand? Enter h or s: ";
-        string choice;
-        getline(cin, choice);
-
-        if (!choice.empty()) {
-             char lower_choice = tolower(choice[0]);
-             if (lower_choice == 'h') {
-                 hit_blackjack(deck, hand);
-                 return true;
-             } else if (lower_choice == 's') {
-                 cout << "Player stands. Dealer is playing." << endl;
-                 return false;
-             }
-        }
-        cout << "Sorry, please enter 'h' or 's'." << endl;
-    }
-}
-
-void show_some_blackjack(const Hand& player_hand, const Hand& dealer_hand) {
-    cout << "\nCurrent Balance: " << player_hand.value << endl; 
-    cout << "\nDealer's Hand:" << endl;
-    cout << " <card hidden>" << endl;
-    if (dealer_hand.cards.size() > 1) {
-         cout << ' ' << dealer_hand.cards[1] << endl;
-    }
-    cout << "\nPlayer's Hand:" << endl;
-    for(const auto& card : player_hand.cards) {
-        cout << ' ' << card << endl;
-    }
-    cout << "Player's Hand = " << player_hand.value << endl;
-}
-
-void show_all_blackjack(const Hand& player_hand, const Hand& dealer_hand) {
-    cout << "\nDealer's Hand:" << endl;
-     for(const auto& card : dealer_hand.cards) {
-        cout << ' ' << card << endl;
-    }
-    cout << "Dealer's Hand = " << dealer_hand.value << endl;
-
-    cout << "\nPlayer's Hand:" << endl;
-    for(const auto& card : player_hand.cards) {
-        cout << ' ' << card << endl;
-    }
-    cout << "Player's Hand = " << player_hand.value << endl;
-}
-
+void hit_blackjack(Deck& deck, Hand& hand) { hand.add_card(deck.deal()); }
+bool hit_or_stand_blackjack(Deck& deck, Hand& hand) { /* ... */ return false; }
+void show_some_blackjack(const Hand& player_hand, const Hand& dealer_hand) { /* ... */ }
+void show_all_blackjack(const Hand& player_hand, const Hand& dealer_hand) { /* ... */ }
 void player_busts_blackjack() { cout << "Player busts!" << endl; }
 void player_wins_blackjack() { cout << "Player wins!" << endl; }
 void dealer_busts_blackjack() { cout << "Dealer busts!" << endl; }
@@ -241,340 +134,257 @@ void push_blackjack() { cout << "Dealer and Player tie! It's a push." << endl; }
 
 
 void play_blackjack(Player& player) {
-    clear_screen();
-    cout << "--- Welcome to Blackjack ---" << endl;
+    clear_screen(); cout << "--- Welcome to Blackjack ---" << endl;
 
-    if (player.balance <= 0) {
-        cout << "You have no money left to play Blackjack!" << endl;
-        press_enter_to_continue();
-        return;
-    }
+    if (player.balance <= 0) { cout << "Insufficient funds." << endl; press_enter_to_continue(); return; }
 
-     while (true) {
-        cout << "Your balance: " << player.balance << ". How much would you like to bet? ";
-        int bet_amount;
-        cin >> bet_amount;
-
-        if (cin.fail()) {
-            cout << "Invalid input. Please enter a number." << endl;
-            cin.clear();
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else if (bet_amount <= 0) {
-             cout << "Bet must be a positive amount." << endl;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else if (bet_amount > player.balance) {
-            cout << "Sorry, your bet cannot exceed your balance of " << player.balance << endl;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else {
-             player.bet = bet_amount;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            break;
-        }
-    }
-
-
-    Deck game_deck;
-    game_deck.shuffle();
-
-    Hand player_hand;
-    Hand dealer_hand;
-
-     try {
-        player_hand.add_card(game_deck.deal());
-        dealer_hand.add_card(game_deck.deal());
-        player_hand.add_card(game_deck.deal());
-        dealer_hand.add_card(game_deck.deal());
-     } catch (const runtime_error& e) {
-         cerr << "Error dealing initial cards: " << e.what() << endl;
-         return;
-     }
-
-
+    if (!take_bet_generic(player, "Blackjack")) return;
+    
+    Deck game_deck; game_deck.shuffle(); Hand player_hand, dealer_hand;
+    try { /* Deal cards */ player_hand.add_card(game_deck.deal()); dealer_hand.add_card(game_deck.deal()); player_hand.add_card(game_deck.deal()); dealer_hand.add_card(game_deck.deal()); } catch(...) { /* Handle error */ return; }
     show_some_blackjack(player_hand, dealer_hand);
+    bool player_turn = true, player_busted = false, player_blackjack = (player_hand.value == 21);
+    if (player_blackjack) { cout << "\nPlayer Blackjack!" << endl; player_turn = false; }
+    while (player_turn) { 
+        string choice_str; cout << "Hit or Stand? (h/s): "; getline(cin, choice_str);
+        if (!choice_str.empty()){
+            char lower_choice = tolower(choice_str[0]);
+            if (lower_choice == 'h'){ hit_blackjack(game_deck, player_hand); show_some_blackjack(player_hand, dealer_hand); }
+            else if(lower_choice == 's'){ player_turn = false; cout << "Player stands." << endl;}
+            else { cout << "Invalid choice." << endl; continue;}
+        } else { cout << "Invalid choice." << endl; continue; }
 
-    bool player_turn = true;
-    bool player_busted = false;
-    bool player_blackjack = (player_hand.value == 21);
-
-    if (player_blackjack) {
-         cout << "\nPlayer has Blackjack!" << endl;
-         player_turn = false;
+        if (player_hand.value > 21) { player_busts_blackjack(); player.lose_bet(); player_busted = true; player_turn = false;}
     }
-
-    while (player_turn) {
-        player_turn = hit_or_stand_blackjack(game_deck, player_hand);
-
-        if (player_turn) {
-            show_some_blackjack(player_hand, dealer_hand);
-        }
-
-        if (player_hand.value > 21) {
-            show_some_blackjack(player_hand, dealer_hand);
-            player_busts_blackjack();
-            player.lose_bet();
-            player_turn = false;
-            player_busted = true;
-        }
-    }
-
-    if (!player_busted) {
+    if (!player_busted) { 
         cout << "\n--- Dealer's Turn ---" << endl;
-        cout << "Dealer reveals: " << dealer_hand.cards[0] << endl;
-        cout << "Dealer's Hand: ";
-         for(const auto& card : dealer_hand.cards) cout << card << " ";
-         cout << "(" << dealer_hand.value << ")" << endl;
-
-
-        while (dealer_hand.value < 17) {
-            cout << "Dealer hits..." << endl;
-            try {
-                 hit_blackjack(game_deck, dealer_hand);
-                 cout << "Dealer draws: " << dealer_hand.cards.back() << endl;
-                 cout << "Dealer's Hand total: " << dealer_hand.value << endl;
-            } catch (const runtime_error& e) {
-                cerr << "Error during dealer hit: " << e.what() << endl;
-                break;
-            }
-        }
-
+        while (dealer_hand.value < 17) { try { hit_blackjack(game_deck, dealer_hand); } catch (...) { break;} }
         show_all_blackjack(player_hand, dealer_hand);
-
-         bool dealer_blackjack = (dealer_hand.cards.size() == 2 && dealer_hand.value == 21);
-
-         // Standard win/loss logic assuming 1:1 payout for win_bet/lose_bet
-         if (dealer_hand.value > 21) {
-             dealer_busts_blackjack();
-             if (!(player_blackjack && dealer_blackjack)) { // Player wins unless push BJ
-                  player.win_bet();
-             }
-         } else if (player_blackjack && !dealer_blackjack) {
-              player_wins_blackjack(); // Already announced BJ, confirm win
-              player.win_bet(); // Add 3:2 logic here if needed later
-         } else if (dealer_blackjack && !player_blackjack) {
-              dealer_wins_blackjack();
-              player.lose_bet();
-         } else if (dealer_hand.value > player_hand.value) {
-            dealer_wins_blackjack();
-            player.lose_bet();
-        } else if (dealer_hand.value < player_hand.value) {
-            player_wins_blackjack();
-            player.win_bet();
-        } else { // Tie
-            push_blackjack(); 
-        }
+        bool dealer_blackjack = (dealer_hand.cards.size() == 2 && dealer_hand.value == 21);
+        if (dealer_hand.value > 21) { dealer_busts_blackjack(); if (!(player_blackjack && dealer_blackjack)) player.win_bet(); }
+        else if (player_blackjack && !dealer_blackjack) { player_wins_blackjack(); player.win_bet(); }
+        else if (dealer_blackjack && !player_blackjack) { dealer_wins_blackjack(); player.lose_bet(); }
+        else if (dealer_hand.value > player_hand.value) { dealer_wins_blackjack(); player.lose_bet(); }
+        else if (dealer_hand.value < player_hand.value) { player_wins_blackjack(); player.win_bet(); }
+        else { push_blackjack(); }
     }
-
-    cout << "\nRound over. Your balance is now: " << player.balance << endl;
-    press_enter_to_continue();
+    cout << "\nRound over. Balance: " << player.balance << endl; press_enter_to_continue();
 }
 
 void play_high_low(Player& player) {
-    clear_screen();
-    cout << "--- Welcome to High/Low ---" << endl;
-    cout << "(Guess if the next card is higher or lower than the first. Ace is high. Ties lose.)" << endl;
-
-     if (player.balance <= 0) {
-        cout << "You have no money left to play High/Low!" << endl;
-        press_enter_to_continue();
-        return;
-    }
-
-     // High/Low specific take_bet
-     while (true) {
-        cout << "Your balance: " << player.balance << ". How much would you like to bet? ";
-        int bet_amount;
-        cin >> bet_amount;
-
-        if (cin.fail()) {
-            cout << "Invalid input. Please enter a number." << endl;
-            cin.clear();
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else if (bet_amount <= 0) {
-             cout << "Bet must be a positive amount." << endl;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else if (bet_amount > player.balance) {
-            cout << "Sorry, your bet cannot exceed your balance of " << player.balance << endl;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        } else {
-             player.bet = bet_amount;
-             cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            break;
-        }
-    }
-
-
-    Deck game_deck;
-    game_deck.shuffle();
-
-    if (game_deck.size() < 2) {
-        cout << "Not enough cards in the deck to play!" << endl;
-         press_enter_to_continue();
-        return;
-    }
-
-    Card first_card = game_deck.deal();
-    cout << "\nFirst card is: " << first_card << " (Value: " << first_card.getValue() << ")" << endl;
-
-    char guess = ' ';
-    while (guess != 'h' && guess != 'l') {
-        cout << "Will the next card be higher (h) or lower (l)? ";
-        string input;
-        getline(cin, input); 
-        if (!input.empty()) {
-            guess = tolower(input[0]);
-        }
-        if (guess != 'h' && guess != 'l') {
-            cout << "Invalid input. Please enter 'h' or 'l'." << endl;
-        }
-    }
-
-    Card second_card = game_deck.deal();
-    cout << "Next card is: " << second_card << " (Value: " << second_card.getValue() << ")" << endl;
-
-    int first_val = first_card.getValue();
-    int second_val = second_card.getValue();
-    bool correct_guess = false;
-
-    if (second_val > first_val && guess == 'h') {
-        correct_guess = true;
-    } else if (second_val < first_val && guess == 'l') {
-        correct_guess = true;
-    }
-
-    if (correct_guess) {
-        cout << "\nCorrect!" << endl;
-        player.win_bet();
-    } else if (second_val == first_val) {
-        cout << "\nIt's a tie! You lose." << endl;
-        player.lose_bet();
-    }
-     else {
-        cout << "\nIncorrect." << endl;
-        player.lose_bet();
-    }
-
-    cout << "\nRound over. Your balance is now: " << player.balance << endl;
-    press_enter_to_continue();
+    clear_screen(); cout << "--- Welcome to High/Low ---" << endl;
+    if (player.balance <= 0) { cout << "Insufficient funds." << endl; press_enter_to_continue(); return; }
+    if (!take_bet_generic(player, "High/Low")) return;
+    Deck game_deck; game_deck.shuffle();
+    if (game_deck.size() < 2) { cout << "Not enough cards." << endl; press_enter_to_continue(); return; }
+    Card first_card = game_deck.deal(); cout << "\nFirst card: " << first_card << endl;
+    char guess = ' '; while (guess != 'h' && guess != 'l') { /* Get guess */ cout << "Higher (h) or Lower (l)? "; string gs; getline(cin, gs); if(!gs.empty()) guess=tolower(gs[0]); else cout << "Invalid." << endl;}
+    Card second_card = game_deck.deal(); cout << "Next card: " << second_card << endl;
+    int v1 = first_card.getValue(), v2 = second_card.getValue();
+    bool correct = (v2 > v1 && guess == 'h') || (v2 < v1 && guess == 'l');
+    if (v1 == v2) { cout << "\nTie! You lose." << endl; player.lose_bet(); }
+    else if (correct) { cout << "\nCorrect!" << endl; player.win_bet(); }
+    else { cout << "\nIncorrect." << endl; player.lose_bet(); }
+    cout << "\nRound over. Balance: " << player.balance << endl; press_enter_to_continue();
 }
 
-
 void play_slots(Player& player) {
-    clear_screen();
-    cout << "--- Welcome to Slots ---" << endl;
-
+    clear_screen(); cout << "--- Welcome to Simple Slots ---" << endl;
     const vector<string> symbols = {"🍒", "🍋", "🍊", "🔔", "BAR", " 7 "};
-    const map<string, int> payouts = {
-        {"🍒", 2}, {"🍋", 3}, {"🍊", 5}, {"🔔", 10}, {"BAR", 20}, {" 7 ", 50}
-    };
+    const map<string, int> payouts = {{"🍒", 2}, {"🍋", 3}, {"🍊", 5}, {"🔔", 10}, {"BAR", 20}, {" 7 ", 50}};
     static mt19937 rng(chrono::system_clock::now().time_since_epoch().count());
     uniform_int_distribution<int> dist(0, symbols.size() - 1);
 
-    while (true) {
-        clear_screen();
-         cout << "--- Slots ---" << endl;
-         if (player.balance <= 0) {
-            cout << "You have no money left to play Slots!" << endl;
-            press_enter_to_continue();
-            return;
-         }
-
+    while (true) { 
+        clear_screen(); cout << "--- Simple Slots ---" << endl;
+        if (player.balance <= 0) { cout << "Insufficient funds." << endl; press_enter_to_continue(); return; }
         cout << "Current Balance: " << player.balance << endl;
-        if (!take_bet_slots(player)) { 
-             return; 
-        }
+        if (!take_bet_generic(player, "Simple Slots")) return;
 
-        while (true) {
-             clear_screen(); 
-             cout << "--- Slots ---" << endl;
-             cout << "Current Balance: " << player.balance << " | Current Bet: " << player.bet << endl;
+        while (true) { 
+            clear_screen(); cout << "--- Simple Slots ---" << endl;
+            cout << "Balance: " << player.balance << " | Bet: " << player.bet << endl;
+            if (player.balance < player.bet) { cout << "\nInsufficient balance for bet." << endl; this_thread::sleep_for(chrono::seconds(2)); break; }
 
-
-             if (player.balance < player.bet) {
-                 cout << "\nNot enough balance for the current bet of " << player.bet << "." << endl;
-                 cout << "Please change your bet." << endl;
-                 this_thread::sleep_for(chrono::seconds(2)); 
-                 break; 
-             }
-
-            vector<string> result;
-            cout << "\nSpinning..." << endl;
-            this_thread::sleep_for(chrono::milliseconds(200));
-
-            cout << "[ ";
-            for (int i = 0; i < 3; ++i) {
-                result.push_back(symbols[dist(rng)]);
-                cout << result[i] << (i < 2 ? " | " : "");
-                this_thread::sleep_for(chrono::milliseconds(500));
-            }
-            cout << " ]" << endl << endl;
+            vector<string> result; cout << "\nSpinning..." << endl; this_thread::sleep_for(chrono::milliseconds(700));
+            cout << "[ "; for (int i = 0; i < 3; ++i) { result.push_back(symbols[dist(rng)]); cout << result[i] << (i < 2 ? " | " : ""); } cout << " ]" << endl << endl;
 
             bool win = false;
             if (result[0] == result[1] && result[1] == result[2]) {
-                string win_symbol = result[0];
-                int multiplier = 0;
-                try {
-                    multiplier = payouts.at(win_symbol);
-                    win = true;
+                string sym = result[0]; int multiplier = 0;
+                try { multiplier = payouts.at(sym); win = true; int winnings = player.bet * multiplier; int profit = winnings - player.bet; player.balance += profit; cout << "!!! JACKPOT !!! x" << multiplier << " Win: " << winnings << endl; }
+                catch (...) { cout << "Payout Error. Lose." << endl; player.balance -= player.bet; }
+            }
+            if (!win) { cout << "Sorry, lose." << endl; player.balance -= player.bet; }
+            cout << "Balance after spin: " << player.balance << endl;
+            if (player.balance <= 0) { cout << "\nOut of money!" << endl; press_enter_to_continue(); return; }
 
-                    int winnings = player.bet * multiplier;
-                    int profit = winnings - player.bet;
-                    player.balance += profit;
+            cout << "\nOptions: [Enter]/[s] Spin | [c] Change bet | [q] Quit: "; string action; getline(cin, action);
+            char cmd = action.empty() ? 's' : tolower(action[0]);
+            if (cmd == 'q') return;
+            if (cmd == 'c') break;
+            if (cmd == 's') continue;
+            cout << "Invalid. Spinning again..." << endl; this_thread::sleep_for(chrono::seconds(1)); continue;
+        }
+    }
+}
 
-                    cout << "!!! JACKPOT !!! You matched three " << win_symbol << "'s!" << endl;
-                    cout << "You win " << winnings << " (Profit: " << profit << ")" << endl;
 
-                } catch (const out_of_range& oor) {
-                    cerr << "Error: Winning symbol " << win_symbol << " not found in payouts map." << endl;
-                    cout << "Sorry, you lose this time (Payout Error)." << endl;
-                    player.balance -= player.bet; 
+
+const vector<string> symbols_3x3 = {" 🍒  ", " 🍋 ", " 🍊 ", " 🔔  ", " ⛔" ," ♿", "⭐" } ; 
+const string WILD_SYMBOL = "⭐";
+const map<string, int> payouts_3x3 = {
+    {" 🍒  ", 2}, {" 🍋 ", 3}, {" 🍊 ", 5}, {" 🔔  ", 7}, {" ⛔", 10}, {" ♿", 15}, {WILD_SYMBOL, 25} 
+};
+
+
+const vector<vector<pair<int, int>>> win_lines_3x3 = {
+    {{0, 0}, {0, 1}, {0, 2}}, // Top Horizontal
+    {{1, 0}, {1, 1}, {1, 2}}, // Middle Horizontal
+    {{2, 0}, {2, 1}, {2, 2}}, // Bottom Horizontal
+    {{0, 0}, {1, 1}, {2, 2}}, // Diagonal TL-BR
+    {{0, 2}, {1, 1}, {2, 0}}  // Diagonal TR-BL
+};
+
+int check_line(const vector<vector<string>>& grid,
+               const vector<pair<int, int>>& line_coords,
+               const map<string, int>& payouts)
+{
+    string s1 = grid[line_coords[0].first][line_coords[0].second];
+    string s2 = grid[line_coords[1].first][line_coords[1].second];
+    string s3 = grid[line_coords[2].first][line_coords[2].second];
+
+    if (s1 == s2 && s2 == s3) {
+        try { return payouts.at(s1); } catch(...) { return 0; } 
+    }
+
+    string effective_symbol = "";
+    int wild_count = 0;
+    int non_wild_count = 0;
+
+    if (s1 == WILD_SYMBOL) wild_count++; else { effective_symbol = s1; non_wild_count++; }
+    if (s2 == WILD_SYMBOL) wild_count++; else { if (effective_symbol == "" || effective_symbol == s2) {effective_symbol = s2; non_wild_count++;} else non_wild_count = 10; }
+    if (s3 == WILD_SYMBOL) wild_count++; else { if (effective_symbol == "" || effective_symbol == s3) {effective_symbol = s3; non_wild_count++;} else non_wild_count = 10; } 
+    if (wild_count > 0 && wild_count + non_wild_count == 3 && non_wild_count >= 1 && effective_symbol != "") {
+        try { return payouts.at(effective_symbol); } catch(...) { return 0; } 
+    }
+
+    return 0;
+}
+
+
+void play_slots_3x3(Player& player) {
+    clear_screen();
+    cout << "--- Welcome to 3x3 Slots ---" << endl;
+
+    static mt19937 rng(chrono::system_clock::now().time_since_epoch().count() + 1); 
+    uniform_int_distribution<int> dist(0, symbols_3x3.size() - 1);
+
+    while (true) {
+        clear_screen();
+        cout << "--- 3x3 Slots ---" << endl;
+        if (player.balance <= 0) {
+            cout << "You have no money left to play!" << endl;
+            press_enter_to_continue();
+            return;
+        }
+        cout << "Current Balance: " << player.balance << endl;
+        if (!take_bet_generic(player, "3x3 Slots")) {
+            return; 
+        }
+
+        while (true) {
+            clear_screen();
+            cout << "--- 3x3 Slots ---" << endl;
+            cout << "Balance: " << player.balance << " | Bet: " << player.bet << endl;
+
+            if (player.balance < player.bet) {
+                cout << "\nNot enough balance for the current bet of " << player.bet << "." << endl;
+                cout << "Please change your bet." << endl;
+                this_thread::sleep_for(chrono::seconds(2));
+                break; // Break inner loop to go back to taking bet
+            }
+
+            // --- Spin Logic ---
+            vector<vector<string>> grid(3, vector<string>(3));
+            cout << "\nSpinning..." << endl;
+            this_thread::sleep_for(chrono::milliseconds(700));
+
+            const int cell_width = 6;
+            string h_separator = "+";
+            for (int i = 0; i < 3; ++i) {
+                h_separator += string(cell_width + 2, '-') + "+"; 
+            }
+
+            cout << h_separator << endl;
+            for (int r = 0; r < 3; ++r) {
+                cout << "| "; // Left edge
+                for (int c = 0; c < 3; ++c) {
+                    grid[r][c] = symbols_3x3[dist(rng)];
+                    cout << "  " << left << setw(cell_width) << grid[r][c] << "  |";
+                }
+                cout << endl;
+                cout << h_separator << endl;
+            }
+            cout << endl;
+
+            int total_payout_multiplier = 0;
+            vector<int> winning_lines_indices;
+
+            for(int i = 0; i < win_lines_3x3.size(); ++i) {
+                int line_payout = check_line(grid, win_lines_3x3[i], payouts_3x3);
+                if (line_payout > 0) {
+                    total_payout_multiplier += line_payout;
+                    winning_lines_indices.push_back(i + 1); 
                 }
             }
 
-            if (!win) {
-                cout << "Sorry, you lose this time." << endl;
+            if (total_payout_multiplier > 0) {
+                int total_winnings = player.bet * total_payout_multiplier;
+                int net_change = total_winnings - player.bet;
+                player.balance += net_change;
+
+                cout << "!!! WIN !!! on line(s): ";
+                for(size_t i = 0; i < winning_lines_indices.size(); ++i) {
+                    cout << winning_lines_indices[i] << (i < winning_lines_indices.size() - 1 ? ", " : "");
+                }
+                cout << endl;
+                cout << "Total Payout: " << total_winnings << " (Net Gain: " << net_change << ")" << endl;
+            } else {
+                cout << "Sorry, no winning lines this spin." << endl;
                 player.balance -= player.bet; 
             }
-
             cout << "Balance after spin: " << player.balance << endl;
-   
 
-
-         
-             if (player.balance <= 0) {
-                  cout << "\nYou've run out of money!" << endl;
-                  press_enter_to_continue();
-                  return;
-             }
-
-            // Prompt for next action
-            cout << "\nOptions: [Enter] or [s] to spin again | [c] Change bet | [q] Quit slots: ";
-            string action;
-            getline(cin, action); 
-
-            char command = ' ';
-            if (!action.empty()) {
-                command = tolower(action[0]);
+            if (player.balance <= 0) {
+                cout << "\nYou've run out of money!" << endl;
+                press_enter_to_continue();
+                return;
             }
 
-            if (command == 'q') {
-                return; 
-            } else if (command == 'c') {
-                break; 
-            } else if (command == 's' || action.empty()) {
+            // --- User Action Prompt ---
+            cout << "\nOptions: [Enter] or [s] to spin again | [c] Change bet | [q] Quit slots: ";
+            string action;
+            getline(cin, action);
+
+            char command = ' ';
+            if (!action.empty()) command = tolower(action[0]);
+            else command = 's';
+
+            if (command == 'q') return;
+            if (command == 'c') break; 
+            if (command == 's') continue; 
+            else {
+                cout << "Invalid command. Spinning again..." << endl;
+                this_thread::sleep_for(chrono::seconds(1));
                 continue;
-            } else {
-                 cout << "Invalid command. Spinning again..." << endl;
-                 this_thread::sleep_for(chrono::seconds(1));
-                 continue; 
             }
         }
     } 
 }
 
-
 int main() {
     Player player(1000);
-
     cin.sync();
 
     while (true) {
@@ -584,9 +394,10 @@ int main() {
         cout << "-----------------------------" << endl;
         cout << "1. Play Blackjack" << endl;
         cout << "2. Play High/Low" << endl;
-        cout << "3. Play Slots" << endl;
-        cout << "4. View Balance" << endl;
-        cout << "5. Quit" << endl;
+        cout << "3. Play Simple Slots (1x3)" << endl; 
+        cout << "4. Play 3x3 Slots" << endl;          
+        cout << "5. View Balance" << endl;
+        cout << "6. Quit" << endl;                   
         cout << "-----------------------------" << endl;
         cout << "Enter your choice: ";
 
@@ -594,38 +405,20 @@ int main() {
         cin >> choice;
 
         if (cin.fail()) {
-            cin.clear();
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
-            cout << "Invalid input. Please enter a number." << endl;
-            this_thread::sleep_for(chrono::seconds(1)); 
-            continue;
+            cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input." << endl; this_thread::sleep_for(chrono::seconds(1)); continue;
         }
-         cin.ignore(numeric_limits<streamsize>::max(), '\n');
-
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
         switch (choice) {
-            case 1:
-                play_blackjack(player);
-                break;
-            case 2:
-                play_high_low(player);
-                break;
-            case 3:
-                 play_slots(player);
-                 break;
-            case 4:
-                 cout << "\nYour current balance is: " << player.balance << endl;
-                 press_enter_to_continue();
-                 break;
-            case 5:
-                cout << "\nThanks for playing! Your final balance is: " << player.balance << endl;
-                return 0;
-            default:
-                cout << "Invalid choice. Please try again." << endl;
-                this_thread::sleep_for(chrono::seconds(1));
-                break;
+            case 1: play_blackjack(player); break;
+            case 2: play_high_low(player); break;
+            case 3: play_slots(player); break; 
+            case 4: play_slots_3x3(player); break; 
+            case 5: cout << "\nCurrent balance: " << player.balance << endl; press_enter_to_continue(); break;
+            case 6: cout << "\nThanks for playing! Final balance: " << player.balance << endl; return 0;
+            default: cout << "Invalid choice." << endl; this_thread::sleep_for(chrono::seconds(1)); break;
         }
     }
-
     return 0;
 }
